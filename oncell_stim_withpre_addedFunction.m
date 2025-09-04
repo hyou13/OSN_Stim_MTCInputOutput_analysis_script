@@ -51,6 +51,7 @@ end
 
 for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protocol
     
+    bsl_duration = 6;
     I{sweep} = selprotI(:,sweep);   % Store all trace datapoint in the current trace into I{singlesweep}
     
     % Copying in Time data (normalising for sampling rate)
@@ -86,9 +87,8 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
     bsl_spike_timestamps = []; % Create an empty list for storing timepoint (s) of spikes
     bsl_spike_indx = [];  % Create an empty list for index of spikes
 
-    end_of_bsl_mask = t{sweep}<6; % HARDCODED: At 6s, we gave our electrical stimulation.
-                                  % Essentially this line stores all the time(s) of our baseline window into a variable.
-
+    end_of_bsl_mask = t{sweep}<=bsl_duration; % Logical output: "1" for all time in t{sweep} if it is before 6s.
+                                  
     bsl_last_indx = find(end_of_bsl_mask, 1, 'last'); % Find the last index of the baseline window that is non-zero
 
     for bsl_indx = 1:bsl_last_indx
@@ -169,6 +169,32 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
         preISIs = diff(prespkt_filtered);
     end
 
+    if ~isempty(prespkt_filtered)
+    preTotal_SpikeNo = length(prespkt_filtered)
+
+        if preTotal_SpikeNo > 1
+            prespk_trn_lth = prespkt_filtered(end) - prespkt_filtered(1)
+    
+            if prespk_trn_lth > 0
+                preAve_Freq = preTotal_SpikeNo ./ prespk_trn_lth % Hz
+            else
+                preAve_Freq = 0
+            end
+        
+    
+        elseif preTotal_SpikeNo == 1
+           prespk_trn_lth = 0 % Only 1 spike → cannot compute train length
+           preAve_Freq = preTotal_SpikeNo ./ bsl_duration
+        
+        end
+        
+
+    else
+            preTotal_SpikeNo = 0
+            prespk_trn_lth = 0
+            preAve_Freq    = 0
+    end
+
     % %Filter spikes artefact that's 1ms apart from each other
     % if length(prespkt)>1
     %     q = find(diff(prespkt)<.001);  % q+1: List of index of pre-stim spike that's <1ms away from their previous spike
@@ -198,8 +224,9 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
 
     evoked_spike_timestamps = []; % Create an empty list for storing timepoint (s) of spike
     evoked_spike_indx = []; % ... for storing spike index
+    
 
-    beginning_of_recording_mask = t{sweep}>6.01; % HARDCODED: Start of response window
+    beginning_of_recording_mask = t{sweep}>(bsl_duration+0.01); % Start of response window; +10 ms to avoid detecting stimulation artefact
 
     recording_start_indx = find(beginning_of_recording_mask, 1, 'first'); % find the index of start time point of recording window
 
@@ -272,7 +299,7 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
     intrain_mask = spkt_filtered<x1; % Logical output of whether spike are within your selected time(s)
     
     spkt_trn = spkt_filtered(intrain_mask); % Time(s) of spike within your selected time
-    spka_trn = spka(intrain_mask)           % Amplitude(A)....
+    spka_trn = spka_filtered(intrain_mask)           % Amplitude(A)....
     
     TF2 = isempty(spkt_trn);
 
@@ -296,32 +323,19 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
     %disp(mean(ISIs))
     %disp(std(ISIs))
     
-    
-    if preTF == 0
-        preTotal_SpikeNo = length(prespkt_filtered);
-        prespk_trn_lth = prespkt_filtered(end) - prespkt_filtered(1);
-        preAve_Freq = preTotal_SpikeNo ./ prespk_trn_lth;
-
-    else
-        preTotal_SpikeNo = 0;
-        prespk_trn_lth = 0;
-        preAve_Freq = 0;
-        
-    end
-    
      
     if TF == 0 && TF2 == 0
         Total_SpikeNo = length(spkt_trn);
-        Total_Time = t{sweep}(end) - 6.01; %HARDCODED
+        Total_Time = t{sweep}(end) - (bsl_duration+0.01);
         spkt_trn_lth = spkt_trn(end) - spkt_trn(1);
         Ave_Freq = length(spkt_trn) ./ spkt_trn_lth;
         CV = std(evoked_spike_ISIs) ./ mean(evoked_spike_ISIs);
         Max_Freq = 1 / min(evoked_spike_ISIs);
-        Latency = evoked_spike_timestamps(1) - 6.01; %HARDCODED
+        Latency = evoked_spike_timestamps(1) - (bsl_duration+0.01);
         
     else
         Total_SpikeNo = 0;
-        Total_Time = t{sweep}(end) - 6.01; %HARDCODED
+        Total_Time = t{sweep}(end) - (bsl_duration+0.01);
         spkt_trn_lth = 0;
         Ave_Freq = 0;
         CV = NaN;
@@ -345,6 +359,7 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
     
     disp("press any key to continue")
     pause;
+
 end
 
 
