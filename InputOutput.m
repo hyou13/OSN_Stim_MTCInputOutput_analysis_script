@@ -132,6 +132,11 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
         
     end
 
+    % --- Update graph axis
+    ymin = min(prespka) - 20e-12; % 20 pA
+    ymax = min(prespka) + 100e-12; % 40 pA
+    axis([0 13.6 ymin ymax]);
+
     % --- before filtering ---
     prespkt_filtered   = prespkt;      % default: nothing removed
     prespka_filtered   = prespka;
