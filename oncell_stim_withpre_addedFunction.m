@@ -1,4 +1,4 @@
-function [spikeanalysis_v2] = oncell_stim_withpre(ephysData, Cells, protocol_iteration)
+function [spikeanalysis] = oncell_stim_withpre(ephysData, Cells, protocol_iteration)
 
 % cells = number of cells you recorded in a single .dat bundle file. Usually it is one cell per .dat file
 % protocol = number of repetition.
@@ -292,22 +292,52 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
 
         end
     end
+
+    evoked_spike_ISIs_vector = diff(spkt_filtered);
+    evoked_IFF_vector = 1./evoked_spike_ISIs_vector;
+
+     % check if all IFF is =< bsl average firing frequency
+    if all(preAve_Freq >= evoked_IFF_vector)
     
-    disp('Click on end of spike train')
+        % --- If true, no spikes are included
+        spkt_trn = [];
+        spka_trn = [];
+
+    else
+        % --- Find first indx when evoked_IFF_vector <= preAve_Freq
+        idxDrop = find(evoked_IFF_vector <= preAve_Freq, 1, 'first');
+
+        % --- If none, include all spikes
+        if isempty(idxDrop)
+            spkt_trn = spkt_filtered;
+            spka_trn = spka_filtered
     
-    [x1,~] = ginput(1);  % Store the x-coordinate(i.e. time(s)) of your input
-    intrain_mask = spkt_filtered<x1; % Logical output of whether spike are within your selected time(s)
+        % --- else, include spikes before IFF FIRST dropped/equal to preAve_Freq
+        else
+            spkt_trn = spkt_filtered(1:idxDrop);
+            spka_trn = spka_filtered(1:idxDrop)
+        end
     
-    spkt_trn = spkt_filtered(intrain_mask); % Time(s) of spike within your selected time
-    spka_trn = spka_filtered(intrain_mask)           % Amplitude(A)....
+        %numel(spkt_beforeDrop)
+
+    end
+    
+    % disp('Click on end of spike train')
+    % 
+    % [x1,~] = ginput(1);  % Store the x-coordinate(i.e. time(s)) of your input
+    % intrain_mask = spkt_filtered<x1; % Logical output of whether spike are within your selected time(s)
+    % 
+    % spkt_trn = spkt_filtered(intrain_mask); % Time(s) of spike within your selected time
+    % spka_trn = spka_filtered(intrain_mask)           % Amplitude(A)....
+    % 
     
     TF2 = isempty(spkt_trn);
 
-     % --- plot evoked spike ---
+     % --- green dots for evoked spike ---
      if ~isempty(spkt_trn)
          plot(spkt_trn,spka_trn,'go')
      end
-    % --- plot evoked spike artefact ---
+    % --- purple dots for evoked spike artefact ---
      if ~isempty(spkt_artefact)
          plot(spkt_artefact,spka_artefact,'o','Color', [0.5 0 0.5])
      end
