@@ -62,12 +62,16 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
     
     t{sweep} = time(:,sweep); % Select time for the current trace
     
+    % === Top panel: raw trace with spikes ===
+    subplot(2,1,1);   % 2 rows, 1 column, 1st subplot (top)
     plot(t{sweep},I{sweep}); %plot time(s) in x-axis and current(A) in y-axis
     title(['Sweep ' num2str(sweep)]);
     minplot = min(I{sweep});
     minaxis = minplot - 0.000000000005;
     axis([0 13.6 -0.0000000005 0.00000000005]); %HARDCODED:The limit of X-axis here is hardcoded.
-    
+    xlabel('Time (s)');
+    ylabel('Current (A)');
+
     hold on
     
 %Selecting input threshold on the plot%
@@ -369,6 +373,23 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
 
      hold off
     
+    % === Bottom panel: IFF ===
+    subplot(2,1,2);   % 2 rows, 1 column, 2nd subplot (bottom)
+    
+    if length(spkt_trn) > 1
+        plot(spkt_filtered(2:end), evoked_IFF_vector, 'o-');
+        hold on
+        xline(spkt_filtered(idxDrop+1),'r--'); % Beginning (inclusive) of spike exclusion
+        yline(preAve_Freq,'r--');
+        hold off
+        xlabel('Time (s)');
+        ylabel('IFF (Hz)');
+        title('Instantaneous Firing Frequency');
+    else
+        text(0.5,0.5,'Not enough spikes for calculating IFF','Units','normalized',...
+            'HorizontalAlignment','center');
+    end
+
     %figure(2)
     %hist(ISIs,50)
     %disp(mean(ISIs))
