@@ -73,8 +73,8 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
     ylabel('Current (A)');
 
     hold on
-    
-%Selecting input threshold on the plot%
+
+    % Selecting input threshold on the plot%
 
     if pick==1 
         disp('Click for spike threshold')
@@ -86,7 +86,10 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
         plot([allt(1) allt(end)],[mean(alli)-scale.*std(alli) mean(alli)-scale.*std(alli)],'m-')
     end
         
-%pre-stim spikes: Background spikes%
+    % Ask for stimulation intensity
+    stimulation_intensity = input('What is the stimulation intensity? ');
+
+    % pre-stim spikes: Background spikes%
 
     bsl_spike_timestamps = []; % Create an empty list for storing timepoint (s) of spikes
     bsl_spike_indx = [];  % Create an empty list for index of spikes
@@ -379,7 +382,9 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
     if length(spkt_trn) > 1
         plot(spkt_filtered(2:end), evoked_IFF_vector, 'o-');
         hold on
-        xline(spkt_filtered(idxDrop+1),'r--'); % Beginning (inclusive) of spike exclusion
+        if ~isempty(idxDrop)
+            xline(spkt_filtered(idxDrop+1),'r--'); % Beginning (inclusive) of spike exclusion
+        end
         yline(preAve_Freq,'r--');
         hold off
         xlabel('Time (s)');
@@ -414,19 +419,39 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
         Max_Freq = 0;
         Latency = NaN;
     end
+
+    % Subtracting evoked spikes by preAve_Freq*spkt_trn_lth
+    bsl_spike_in_spkt_trn  = round(preAve_Freq*spkt_trn_lth);
+    bsl_subtracted_SpikeNo = Total_SpikeNo - bsl_spike_in_spkt_trn;
+        
+    if bsl_subtracted_SpikeNo < 0
+        bsl_subtracted_SpikeNo = 0;
+    end
+
+
+    % Subtracted spike section
+    spikeanalysis(sweep, 1) = stimulation_intensity;
+    spikeanalysis(sweep, 2) = sweep;
+    spikeanalysis(sweep, 3) = bsl_subtracted_SpikeNo;
+    spikeanalysis(sweep, 4) = Total_SpikeNo;
+    spikeanalysis(sweep, 5) = preAve_Freq;
+    spikeanalysis(sweep, 6) = spkt_trn_lth;
+    spikeanalysis(sweep, 7) = bsl_spike_in_spkt_trn;
+
+    % Post-stimulus spike section
+    spikeanalysis(sweep, 8) = sweep;
+    spikeanalysis(sweep, 9) = Total_SpikeNo;
+    spikeanalysis(sweep, 10) = Total_Time;
+    spikeanalysis(sweep, 11) = spkt_trn_lth;
+    spikeanalysis(sweep, 12) = Ave_Freq;
+    spikeanalysis(sweep, 13) = Max_Freq;
+    spikeanalysis(sweep, 14) = CV;
+    spikeanalysis(sweep, 15) = Latency;
     
-    spikeanalysis(sweep, 1) = sweep;
-    spikeanalysis(sweep, 2) = Total_SpikeNo;
-    spikeanalysis(sweep, 3) = Total_Time;
-    spikeanalysis(sweep, 4) = spkt_trn_lth;
-    spikeanalysis(sweep, 5) = Ave_Freq;
-    spikeanalysis(sweep, 6) = Max_Freq;
-    spikeanalysis(sweep, 7) = CV;
-    spikeanalysis(sweep, 8) = Latency;
-    
-    spikeanalysis(sweep, 9) = preTotal_SpikeNo;
-    spikeanalysis(sweep, 10) = prespk_trn_lth;
-    spikeanalysis(sweep, 11) = preAve_Freq;
+    % Pre-stimuli spike section
+    spikeanalysis(sweep, 16) = preTotal_SpikeNo;
+    spikeanalysis(sweep, 17) = prespk_trn_lth;
+    spikeanalysis(sweep, 18) = preAve_Freq;
        
     
     disp("press any key to continue")
@@ -434,3 +459,4 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
 
 end
 
+spikeanalysis = sortrows(spikeanalysis, 1);
