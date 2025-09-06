@@ -132,11 +132,6 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
         
     end
 
-    % --- Update graph axis
-    ymin = min(prespka) - 20e-12; % 20 pA
-    ymax = min(prespka) + 100e-12; % 40 pA
-    axis([0 13.6 ymin ymax]);
-
     % --- before filtering ---
     prespkt_filtered   = prespkt;      % default: nothing removed
     prespka_filtered   = prespka;
@@ -145,6 +140,8 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
     
     % --- filter spikes <1 ms apart ---
     if numel(prespkt) > 1
+
+        % Find spike indx where they are less that 1ms apart
         q = find(diff(prespkt) < 0.001);
         if ~isempty(q)
             arte_idx             = q + 1;                 % the "artefact" spikes
@@ -275,6 +272,22 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
         
     end
 
+    % Update graph axis base on pre-spikes or evoked-spike amplitude
+    if ~isempty(spkt)
+        ymin = min(spka) - 20e-12; % 20 pA
+        ymax = min(spka) + 100e-12; % 40 pA
+        axis([0 13.6 ymin ymax]);
+
+    elseif isempty(spkt) & ~isempty(prespka)
+        ymin = min(prespka) - 20e-12; % 20 pA
+        ymax = min(prespka) + 100e-12; % 40 pA
+        axis([0 13.6 ymin ymax]);
+
+    else
+        axis([0 13.6 -0.0000000005 0.00000000005]); %HARDCODED:The limit of X-axis here is hardcoded.
+    end
+    
+
      % --- before filtering ---
     spkt_filtered   = spkt;      % default: nothing removed
     spka_filtered   = spka;
@@ -298,6 +311,8 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
         end
     end
 
+    % Calculate IFF and determine spike train based on IFF
+
     evoked_spike_ISIs_vector = diff(spkt_filtered);
     evoked_IFF_vector = 1./evoked_spike_ISIs_vector;
 
@@ -318,6 +333,7 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
             spka_trn = spka_filtered
     
         % --- else, include spikes before IFF FIRST dropped/equal to preAve_Freq
+        % --- spike with IFF == preAve_Freq is excluded
         else
             spkt_trn = spkt_filtered(1:idxDrop);
             spka_trn = spka_filtered(1:idxDrop)
@@ -396,5 +412,4 @@ for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protoco
     pause;
 
 end
-
 
