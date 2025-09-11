@@ -18,6 +18,9 @@ disp('                       ');
 spikeanalysis = [];
 row = 0;
 
+% --- store figures --- %
+outDir = fullfile(pwd,'spiketrn_IFF_figs');
+if ~exist(outDir,'dir'), mkdir(outDir); end
 
 for iCell = Cells %Cells is our input argument, which is usually 1; However this number will increase if you record more than one cell in your .dat file
 
@@ -85,9 +88,10 @@ for iCell = Cells %Cells is our input argument, which is usually 1; However this
             t{sweep} = time(:,sweep); % Select time for the current trace
             
             % === Top panel: raw trace with spikes ===
+            fig = figure('Color','w');   % keep visible because you use ginput
             subplot(2,1,1);   % 2 rows, 1 column, 1st subplot (top)
             plot(t{sweep},I{sweep}); %plot time(s) in x-axis and current(A) in y-axis
-            title(['Sweep ' num2str(sweep)]);
+            title(['WRK OSN ' num2str(protIdxList(protIdx)) ', Sweep ' num2str(sweep)]);
             minplot = min(I{sweep});
             minaxis = minplot - 0.000000000005;
             axis([0 13.6 -0.0000000005 0.00000000005]); %HARDCODED:The limit of X-axis here is hardcoded.
@@ -109,7 +113,8 @@ for iCell = Cells %Cells is our input argument, which is usually 1; However this
             end
                 
             % Ask for stimulation intensity
-            stimulation_intensity = input('What is the stimulation intensity? ');
+            stimulation_intensity = input('What is the stimulation intensity? ')*10; % conver to uA
+            title(['WRK OSN ' num2str(protIdxList(protIdx)) ', stimulation ' num2str(stimulation_intensity) '𝛍A']);
         
             % pre-stim spikes: Background spikes%
         
@@ -479,8 +484,19 @@ for iCell = Cells %Cells is our input argument, which is usually 1; However this
                
             
             disp("press any key to continue")
-            pause;
+            
+            % === SAVE FIGURE / SUBPLOTS ===
+            drawnow;  % make sure graphics are up-to-date
+            
+            %fnameBase = sprintf('Cell%02d_Iter%02d_Sweep%02d_%g_uA', iCell, iterTag, sweep, stimulation_intensity);
+            fnameBase = sprintf('WRKOSN %02d_Sweep%02d_%g_uA', protIdxList(protIdx), sweep, stimulation_intensity);
 
+            % (A) Save the whole figure (PNG + optional FIG)
+            pngPath = fullfile(outDir, [fnameBase '.png']);
+            exportgraphics(fig, pngPath, 'Resolution', 300);
+            % savefig(fig, fullfile(outDir, [fnameBase '.fig']));   % optional: reopenable in MATLAB
+            pause;
+            close(fig);
         end % sweep
     end % protocol iteration
 end % cell
