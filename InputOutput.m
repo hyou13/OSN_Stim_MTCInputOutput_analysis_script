@@ -1,9 +1,15 @@
 function [spikeanalysis] = InputOutput(ephysData, Cells, protocol_iteration)
-
+%
 % cells = number of cells you recorded in a single .dat bundle file. Usually it is one cell per .dat file
-% protocol = number of repetition.
-% For example, if you repeated the same protocol for three times, then you need to run the function thrice
-% E.g. First repeat of cell 1 - (ephysData, 1,1);2nd repeat - (ephysData, 1,2);3rd repeat - (ephysData, 1,3)
+% protocol_iteration can be:
+%   - omitted or []  → run ALL iterations that match protName
+%   - a scalar (e.g. 2) → run just that iteration number among matches
+%   - a vector (e.g. [1 3 5]) → run those specific iterations among matches
+%
+% For example:
+%   [spikeanalysis] = InputOutput(ephysData, 1);          % all iterations
+%   [spikeanalysis] = InputOutput(ephysData, 1, 1);       % only 1st iteration
+%   [spikeanalysis] = InputOutput(ephysData, 1, [1 3 5]); % 1st, 3rd, 5th
 
 %Sorting out traces and protocol info from .dat file for later analysis%
 
@@ -30,386 +36,291 @@ for iCell = Cells %Cells is our input argument, which is usually 1; However this
     % Look for pgf names similar to your protocol name and note their locations.
     protName = 'WRK_OSN'; 
     protLoc = find(strncmp(protName,ephysData.(cellName).protocols,length(protName))); % Store index of columns with name "WRK_OSN"
-                                                                                       
-    % Look for pgf names similar to your protocol name and note their locations.
-    
-    %protocol_iteration = protocol; %protocol is our input arguement, which is to select the number of protocol iteration you want to analyse
-    
+
     % --- Choose which protocol indices to run ---
-    % If input arguement is less than three OR protocol iteration is empty []
     if nargin < 3 || isempty(protocol_iteration)
-
-    % Run all that match the protName
-        protIdxList = protLoc(:).';  % row vector
-
+        % Run all matching iterations (numbered relative to matches)
+        iterNumbers = 1:numel(protLoc);                 % iteration numbers among matches
     else
-    % Backward compatible: only the requested iteration
-        protIdxList = protLoc(protocol_iteration);
-
+        % Backward compatible: only the requested iteration(s)
+        iterNumbers = protocol_iteration(:).';          % force row vector
     end
-    
+
+    % --- validate requested iteration numbers (relative to matches) ---
+    if any(~isfinite(iterNumbers)) || any(iterNumbers~=floor(iterNumbers)) || any(iterNumbers<1)
+        error('protocol_iteration must contain positive integer iteration numbers.');
+    end
+    if any(iterNumbers > numel(protLoc))
+        error('Requested iteration(s) exceed available matches: requested max %d, available %d.', ...
+              max(iterNumbers), numel(protLoc));
+    end
+
+    % Convert relative iteration numbers into absolute column indices
+    protIdxList = protLoc(iterNumbers);                 % absolute indices into .data/.samplingFreq
+
     % --- loop over selected protocol iterations ---
-    for protIdx = 1:numel(protIdxList)
-    
-        selprotI = ephysData.(cellName).data{1,protLoc(protIdx)}; % assessing row 1 and column protLoc(j)
-                                                           % i.e. all ephys traces in that protocol iteration 
-        iterTag = protIdx;
-        
+    for k = 1:numel(protIdxList)
+        selIdx  = protIdxList(k);       % absolute index into ephysData arrays
+        iterTag = iterNumbers(k);       % relative iteration label (1..N among matches)
+
+        selprotI = ephysData.(cellName).data{1, selIdx}; % all traces in this protocol iteration
+        sampfreq = ephysData.(cellName).samplingFreq{1, selIdx}; % sampling frequency stored in .dat file
+
         total_datapoint = size(selprotI,1); % number of rows in ephys traces/number of datapoint = trace duration(s)*20,000
-        total_sweep = size(selprotI,2); % number of column in all ephys traces = number of traces
-        sampfreq = ephysData.(cellName).samplingFreq{1,protLoc(protIdx)}; % sampling frequency stored in .dat file
-        
+        total_sweep     = size(selprotI,2); % number of column in all ephys traces = number of traces
+
         close all
-       
-        pick = 1;  %%% set to 1 for manually setting (negative) threshold for spike detection
-        scale = 10;  %%%% sets no of stds below mean for autothreshold
-        
+
+        pick = 1;     %%% set to 1 for manually setting (negative) threshold for spike detection
+        scale = 10;   %%%% sets no of stds below mean for autothreshold
+
         prespikeno = 0;
         spikeno = 0;
         evoked_spike_ISIs = [];
         preISIs = [];
-    
+
         % --- Per-iteration reset ---
         clear I t time
-    
+
         %Looping through all the column (i.e. traces) - Analysis trace by trace%
-    
         for sweep=1:total_sweep % nsweeps = number of trace/sweep in the current protocol
-            
             bsl_duration = 6;
             I{sweep} = selprotI(:,sweep);   % Store all trace datapoint in the current trace into I{singlesweep}
-            
+
             % Copying in Time data (normalising for sampling rate)
             for datapoint = 1:total_datapoint
                 time(datapoint,sweep) = datapoint/sampfreq; %Create a 2D martix with row as time in 's' and column as current trace number
-                                                            %E.g. 260020th datapoint/20K Hz = 13.001 sec
             end
-            
             t{sweep} = time(:,sweep); % Select time for the current trace
-            
+
             % === Top panel: raw trace with spikes ===
             fig = figure('Color','w');   % keep visible because you use ginput
             subplot(2,1,1);   % 2 rows, 1 column, 1st subplot (top)
             plot(t{sweep},I{sweep}); %plot time(s) in x-axis and current(A) in y-axis
-            title(['WRK OSN ' num2str(protIdxList(protIdx)) ', Sweep ' num2str(sweep)]);
-            minplot = min(I{sweep});
-            minaxis = minplot - 0.000000000005;
+            title(['WRK OSN Iter ' num2str(iterTag) ' (abs idx ' num2str(selIdx) '), Sweep ' num2str(sweep)]);
+            minplot = min(I{sweep}); %#ok<NASGU>
+            minaxis = min(I{sweep}) - 0.000000000005; %#ok<NASGU>
             axis([0 13.6 -0.0000000005 0.00000000005]); %HARDCODED:The limit of X-axis here is hardcoded.
             xlabel('Time (s)');
             ylabel('Current (A)');
-        
             hold on
-        
+
             % Selecting input threshold on the plot%
-        
             if pick==1 
                 disp('Click for spike threshold')
-                [~,th] = ginput(1); % ginput(n) - identify coordinates of 'n' point and store them into variable [x,y]
-                                    % y-coordinate is store as 'thr' which is the amplitude threshold for spike ; x-coordinate is neglected
+                [~,th] = ginput(1); % y-coordinate is the amplitude threshold
             else
-                th = mean(alli)-scale.*std(alli);
-                %plot([allt(1) allt(end)],[mean(alli) mean(alli)],'m-')
-                plot([allt(1) allt(end)],[mean(alli)-scale.*std(alli) mean(alli)-scale.*std(alli)],'m-')
+                th = mean(alli)-scale.*std(alli); %#ok<NODEF>
+                plot([allt(1) allt(end)],[mean(alli)-scale.*std(alli) mean(alli)-scale.*std(alli)],'m-') %#ok<NODEF>
             end
-                
+
             % Ask for stimulation intensity
-            stimulation_intensity = input('What is the stimulation intensity? ')*10; % conver to uA
-            title(['WRK OSN ' num2str(protIdxList(protIdx)) ', stimulation ' num2str(stimulation_intensity) '𝛍A']);
-        
+            stimulation_intensity = input('What is the stimulation intensity? ')*10; % convert to uA
+            title(['WRK OSN Iter ' num2str(iterTag) ' (abs idx ' num2str(selIdx) '), stimulation ' num2str(stimulation_intensity) '𝛍A']);
+
             % pre-stim spikes: Background spikes%
-        
-            bsl_spike_timestamps = []; % Create an empty list for storing timepoint (s) of spikes
-            bsl_spike_indx = [];  % Create an empty list for index of spikes
-        
-            end_of_bsl_mask = t{sweep}<=bsl_duration; % Logical output: "1" for all time in t{sweep} if it is before 6s.
-                                          
-            bsl_last_indx = find(end_of_bsl_mask, 1, 'last'); % Find the last index of the baseline window that is non-zero
-        
+            bsl_spike_timestamps = [];
+            bsl_spike_indx = [];
+
+            end_of_bsl_mask = t{sweep}<=bsl_duration;
+            bsl_last_indx = find(end_of_bsl_mask, 1, 'last');
+
             for bsl_indx = 1:bsl_last_indx
-                if I{sweep}(bsl_indx)>=th %%% so if current trace datapoint in baseline window is above thresh...
-                    if I{sweep}(bsl_indx+1)<th %%% ...but next point is below thresh... This is because spike has a downward deflection
-                        
-                        bsl_spike_timestamps = [bsl_spike_timestamps; t{sweep}(bsl_indx)];% Timestamping spike and append in pre_spikecrosses
-                                                                       % vertical concatenation. This means the code 
-                                                                       % takes the existing array pre_spikecrosses 
-                                                                       % (which initially is empty) and appends the 
-                                                                       % new time value as a new row at the end
-        
-                        bsl_spike_indx = [bsl_spike_indx; bsl_indx];        % Same as above but for index
-                    
+                if I{sweep}(bsl_indx)>=th
+                    if I{sweep}(bsl_indx+1)<th
+                        bsl_spike_timestamps = [bsl_spike_timestamps; t{sweep}(bsl_indx)];
+                        bsl_spike_indx = [bsl_spike_indx; bsl_indx];
                     end
                 end
             end
-            
-            preTF = isempty(bsl_spike_timestamps); %Logical output: whether pre_spikecrosses is empty or not
-            
-            prespikeno = prespikeno + length(bsl_spike_timestamps); % Store the number of spikes in baseline window
-            
-            prespkt = []; % Empty list for storing all pre-spikes time(s)
-            prespka = []; % for storing lowest peak amplitude of all pre-spikes
-            prespki = []; % for storing the index of all pre-spikes
-            
+
+            preTF = isempty(bsl_spike_timestamps); %#ok<NASGU>
+            prespikeno = prespikeno + length(bsl_spike_timestamps);
+
+            prespkt = [];
+            prespka = [];
+            prespki = [];
+
             %Looping through all the pre-stim spikes
             for m = 1:length(bsl_spike_indx)
-                prespikew_i = bsl_spike_indx(m):bsl_spike_indx(m)+50; % HARDCODED: spike window ~2.5ms after crossing
-                                                                        % Store index for the entire spike width
-                                                                        % Qs: Why 2.5 ms
+                prespikew_i = bsl_spike_indx(m):bsl_spike_indx(m)+50; % ~2.5ms after crossing
                 if prespikew_i(end)>(length(t{sweep}))
                     prespikew_i = bsl_spike_indx(m):(length(t{sweep}));  % for crosses right at the end of the sweep
                 end
-                
-                prespikew_a = I{sweep}(prespikew_i);           % Store current (A) of the entire spike trough - from the point of spike threshold to 2.5 ms later
-                prespikew_t = t{sweep}(prespikew_i);           % ... for time of the entire spike trough
-                [prespka(m), prespki(m)] = min(prespikew_a);   % prespka = storing the lowest current (A) value of the spike trough
-                                                               % prespki = storing the index of lowest current (A) value of the spike trough
-                prespkt(m) = prespikew_t(prespki(m));          % prespkt = storing the time(s) of the lowest current (A) value of the spike trough
-                
+
+                prespikew_a = I{sweep}(prespikew_i);
+                prespikew_t = t{sweep}(prespikew_i);
+                [prespka(m), prespki(m)] = min(prespikew_a);
+                prespkt(m) = prespikew_t(prespki(m));
             end
-        
+
             % --- before filtering ---
             prespkt_filtered   = prespkt;      % default: nothing removed
             prespka_filtered   = prespka;
-            prespkt_artefact   = [];           % default: no artefacts; reset every sweeps
+            prespkt_artefact   = [];
             prespka_artefact   = [];
-            
+
             % --- filter spikes <1 ms apart ---
             if numel(prespkt) > 1
-        
-                % Find spike indx where they are less that 1ms apart
                 q = find(diff(prespkt) < 0.001);
                 if ~isempty(q)
-                    arte_idx             = q + 1;                 % the "artefact" spikes
-                                                                  % q+1: List of index of pre-stim spike that's <1ms away from their previous spike
-                    keep_idx             = setdiff(1:numel(prespkt), arte_idx);   % Remove indexes in q+1 from 1:length(prespkt)
-                                                                                  % Remove index of artefact spikes from pre-stim spikes
-            
-                    prespkt_artefact     = prespkt(arte_idx);     % Time of spike artefacts
-                    prespka_artefact     = prespka(arte_idx);     % Amplitude of spike artefacts
-                    prespkt_filtered     = prespkt(keep_idx);     % Time of filtered spikes
-                    prespka_filtered     = prespka(keep_idx);     % Amplitude of filtered spikes
+                    arte_idx             = q + 1;
+                    keep_idx             = setdiff(1:numel(prespkt), arte_idx);
+                    prespkt_artefact     = prespkt(arte_idx);
+                    prespka_artefact     = prespka(arte_idx);
+                    prespkt_filtered     = prespkt(keep_idx);
+                    prespka_filtered     = prespka(keep_idx);
                 end
             end
-            
+
             % --- plot baseline spike ---
             if ~isempty(prespkt_filtered)
                 plot(prespkt_filtered, prespka_filtered, 'ro');   % pre-stim spikes
             end
-            
+
             % --- plot baseline spike artefact ---
             if ~isempty(prespkt_artefact)
                 plot(prespkt_artefact, prespka_artefact, 'bo');   % artefacts
             end
-            
+
             % --- storing baseline spike ISI ---
             if length(prespkt_filtered)>1
-                preISIs = diff(prespkt_filtered);
+                preISIs = diff(prespkt_filtered); %#ok<NASGU>
             end
-        
+
             if ~isempty(prespkt_filtered)
-            preTotal_SpikeNo = length(prespkt_filtered)
-        
+                preTotal_SpikeNo = length(prespkt_filtered); %#ok<NASGU>
+
                 if preTotal_SpikeNo > 1
-                    prespk_trn_lth = prespkt_filtered(end) - prespkt_filtered(1)
-            
+                    prespk_trn_lth = prespkt_filtered(end) - prespkt_filtered(1); %#ok<NASGU>
                     if prespk_trn_lth > 0
-                        preAve_Freq = preTotal_SpikeNo ./ prespk_trn_lth % Hz
+                        preAve_Freq = preTotal_SpikeNo ./ prespk_trn_lth; % Hz
                     else
-                        preAve_Freq = 0
+                        preAve_Freq = 0;
                     end
-                
-            
+
                 elseif preTotal_SpikeNo == 1
-                   prespk_trn_lth = 0 % Only 1 spike → cannot compute train length
-                   preAve_Freq = preTotal_SpikeNo ./ bsl_duration
-                
+                   prespk_trn_lth = 0; % Only 1 spike → cannot compute train length
+                   preAve_Freq = preTotal_SpikeNo ./ bsl_duration;
                 end
-                
-        
             else
-                    preTotal_SpikeNo = 0
-                    prespk_trn_lth = 0
-                    preAve_Freq    = 0
+                preTotal_SpikeNo = 0; %#ok<NASGU>
+                prespk_trn_lth = 0; %#ok<NASGU>
+                preAve_Freq    = 0;
             end
-        
-            % %Filter spikes artefact that's 1ms apart from each other
-            % if length(prespkt)>1
-            %     q = find(diff(prespkt)<.001);  % q+1: List of index of pre-stim spike that's <1ms away from their previous spike
-            %     if ~isempty(q)
-            %         cdi = setdiff([1:length(prespkt)],q+1);  % Remove indexes in q+1 from [1:length(prespkt)]
-            %                                                  %%% so removing any 'spikes' within 1ms of each other from the list of prespkt
-            % 
-            %         prespkt_filtered = prespkt(cdi); % 
-            %         prespka_filtered = prespka(cdi);
-            %         prespkt_artefact = prespkt(q+1);
-            %         prespka_artefact = prespka(q+1);
-            %     end
-            % end
-            % 
-            % % Circling out pre-stim spikes (filtered)
-            % if ~isempty(prespkt_filtered)
-            %     plot(prespkt_filtered,prespka_filtered,'ro')
-            %     plot(prespkt_artefact,prespka_artefact,'bo','MarkerFaceColor','b')
-            % 
-            %     if length(prespkt_filtered)>1
-            %         preISIs = diff(prespkt_filtered);
-            %     end
-            % end
-        
-            
-        %post-stim spikes: response spikes%
-        
-            evoked_spike_timestamps = []; % Create an empty list for storing timepoint (s) of spike
-            evoked_spike_indx = []; % ... for storing spike index
-            
-        
+
+            %post-stim spikes: response spikes%
+            evoked_spike_timestamps = [];
+            evoked_spike_indx = [];
+
             beginning_of_recording_mask = t{sweep}>(bsl_duration+0.01); % Start of response window; +10 ms to avoid detecting stimulation artefact
-        
-            recording_start_indx = find(beginning_of_recording_mask, 1, 'first'); % find the index of start time point of recording window
-        
+            recording_start_indx = find(beginning_of_recording_mask, 1, 'first');
+
             for recording_indx = recording_start_indx:length(I{sweep})-1
-                if I{sweep}(recording_indx)>=th % so if point is above thresh...
-                    if I{sweep}(recording_indx+1)<th % ...but next point is below thresh...
-                                                     % -1 to prevent indexing outside of the vector
-                        evoked_spike_timestamps = [evoked_spike_timestamps; t{sweep}(recording_indx)];        % Timestamping spike and append in evoked_spike_timestamps
-                                                                       % vertical concatenation. This means the code 
-                                                                       % takes the existing array spikecrosses 
-                                                                       % (which initially is empty) and appends the 
-                                                                       % new time value as a new row at the end
-        
-                        evoked_spike_indx = [evoked_spike_indx; recording_indx];                % Same as above but for index
+                if I{sweep}(recording_indx)>=th
+                    if I{sweep}(recording_indx+1)<th % -1 to prevent indexing outside of the vector
+                        evoked_spike_timestamps = [evoked_spike_timestamps; t{sweep}(recording_indx)];
+                        evoked_spike_indx = [evoked_spike_indx; recording_indx];
                     end
                 end
             end
-            
-            
-           TF = isempty(evoked_spike_timestamps); % Logical output "0": evoked_spike_timestamps is not empty
-            
-           spikeno = spikeno + length(evoked_spike_timestamps); % Count the number of spikes
-            
-           spkt = [];  % Empty list for storing spike time(s)
-           spka = [];  % for storing lowest peak amplitude of spike
-           spki = [];  % for storing the index of spike
-            
+
+            TF = isempty(evoked_spike_timestamps); %#ok<NASGU>
+            spikeno = spikeno + length(evoked_spike_timestamps); %#ok<NASGU>
+
+            spkt = [];
+            spka = [];
+            spki = [];
+
             %Looping through all the evoked spikes
             for m = 1:length(evoked_spike_indx)
-                spikew_i = evoked_spike_indx(m):evoked_spike_indx(m)+50; %%% spike window ~2.5ms after crossing
+                spikew_i = evoked_spike_indx(m):evoked_spike_indx(m)+50; % ~2.5ms after crossing
                 if spikew_i(end)>(length(t{sweep}))
-                    spikew_i = evoked_spike_indx(m):(length(t{sweep}));  % for crosses right at the end of the sweep
+                    spikew_i = evoked_spike_indx(m):(length(t{sweep}));
                 end
-                
-                spikew_a = I{sweep}(spikew_i);            % Store current (A) of the entire spike trough - from the point of spike threshold to 2.5 ms later
-                spikew_t = t{sweep}(spikew_i);            % ... for time of the entire spike trough
-                [spka(m), spki(m)] = min(spikew_a);       % spka = storing the lowest current (A) value of the spike trough
-                spkt(m) = spikew_t(spki(m));              % spki = ...index of...
-                                                          % spkt = ...time(s) of...
-        
-                
+                spikew_a = I{sweep}(spikew_i);
+                spikew_t = t{sweep}(spikew_i);
+                [spka(m), spki(m)] = min(spikew_a);
+                spkt(m) = spikew_t(spki(m));
             end
-        
+
             % Update graph axis base on pre-spikes or evoked-spike amplitude
             if ~isempty(spkt)
                 ymin = min(spka) - 20e-12; % 20 pA
-                ymax = min(spka) + 100e-12; % 40 pA
+                ymax = min(spka) + 100e-12; % 100 pA
                 axis([0 13.6 ymin ymax]);
-        
-            elseif isempty(spkt) & ~isempty(prespka)
+            elseif isempty(spkt) && ~isempty(prespka)
                 ymin = min(prespka) - 20e-12; % 20 pA
-                ymax = min(prespka) + 100e-12; % 40 pA
+                ymax = min(prespka) + 100e-12; % 100 pA
                 axis([0 13.6 ymin ymax]);
-        
             else
-                axis([0 13.6 -0.0000000005 0.00000000005]); %HARDCODED:The limit of X-axis here is hardcoded.
+                axis([0 13.6 -0.0000000005 0.00000000005]);
             end
-            
-        
-             % --- before filtering ---
+
+            % --- before filtering ---
             spkt_filtered   = spkt;      % default: nothing removed
             spka_filtered   = spka;
-            spkt_artefact   = [];        % default: no artefacts; reset every sweeps
+            spkt_artefact   = [];
             spka_artefact   = [];
-            
-            
-             % --- filter spikes <1 ms apart --- There will be spike artefact, if the spike threshold are set too close resting current.
+
+            % --- filter spikes <1 ms apart ---
             if numel(spkt) > 1
-                artefact_contaminated_spike_indx = find(diff(spkt)<.001);  %%% so looking for spike crosses less than 1ms apart...
+                artefact_contaminated_spike_indx = find(diff(spkt)<.001);
                 if ~isempty(artefact_contaminated_spike_indx)
                     evoked_spike_artefact_indx = artefact_contaminated_spike_indx + 1; % spike_artefact_indx = spike_indx + 1
-        
                     evoked_spike_keep_indx = setdiff(1:numel(spkt),evoked_spike_artefact_indx); % Remove artefact indexes 
-        
-                    spkt_filtered   = spkt_filtered(evoked_spike_keep_indx); % Time of filtered spike
-                    spka_filtered   = spka(evoked_spike_keep_indx);          % Amplitude(A) of filtered spike
-                    spkt_artefact   = spkt(evoked_spike_artefact_indx);      % Time of spike artefact
-                    spka_artefact   = spka(evoked_spike_artefact_indx);      % Amplitude of spike artefact
-        
+                    spkt_filtered   = spkt(evoked_spike_keep_indx);
+                    spka_filtered   = spka(evoked_spike_keep_indx);
+                    spkt_artefact   = spkt(evoked_spike_artefact_indx);
+                    spka_artefact   = spka(evoked_spike_artefact_indx);
                 end
             end
-        
+
             % Calculate IFF and determine spike train based on IFF
-        
             evoked_spike_ISIs_vector = diff(spkt_filtered);
             evoked_IFF_vector = 1./evoked_spike_ISIs_vector;
-        
-             % check if all IFF is =< bsl average firing frequency
-            if all(preAve_Freq >= evoked_IFF_vector)
-            
+
+            % check if all IFF is =< bsl average firing frequency
+            if ~isempty(evoked_IFF_vector) && all(preAve_Freq >= evoked_IFF_vector)
                 % --- If true, no spikes are included
                 spkt_trn = [];
                 spka_trn = [];
-        
             else
                 % --- Find first indx when evoked_IFF_vector <= preAve_Freq
                 idxDrop = find(evoked_IFF_vector <= preAve_Freq, 1, 'first');
-        
                 % --- If none, include all spikes
                 if isempty(idxDrop)
                     spkt_trn = spkt_filtered;
-                    spka_trn = spka_filtered
-            
-                % --- else, include spikes before IFF FIRST dropped/equal to preAve_Freq
-                % --- spike with IFF == preAve_Freq is excluded
+                    spka_trn = spka_filtered;
                 else
+                    % include spikes before IFF FIRST dropped/equal to preAve_Freq
                     spkt_trn = spkt_filtered(1:idxDrop);
-                    spka_trn = spka_filtered(1:idxDrop)
+                    spka_trn = spka_filtered(1:idxDrop);
                 end
-            
-                %numel(spkt_beforeDrop)
-        
             end
-            
-            % disp('Click on end of spike train')
-            % 
-            % [x1,~] = ginput(1);  % Store the x-coordinate(i.e. time(s)) of your input
-            % intrain_mask = spkt_filtered<x1; % Logical output of whether spike are within your selected time(s)
-            % 
-            % spkt_trn = spkt_filtered(intrain_mask); % Time(s) of spike within your selected time
-            % spka_trn = spka_filtered(intrain_mask)           % Amplitude(A)....
-            % 
-            
-            TF2 = isempty(spkt_trn);
-        
-             % --- green dots for evoked spike ---
-             if ~isempty(spkt_trn)
-                 plot(spkt_trn,spka_trn,'go')
-             end
+
+            TF2 = isempty(spkt_trn); %#ok<NASGU>
+
+            % --- green dots for evoked spike ---
+            if ~isempty(spkt_trn)
+                plot(spkt_trn,spka_trn,'go')
+            end
             % --- purple dots for evoked spike artefact ---
-             if ~isempty(spkt_artefact)
-                 plot(spkt_artefact,spka_artefact,'o','Color', [0.5 0 0.5])
-             end
+            if ~isempty(spkt_artefact)
+                plot(spkt_artefact,spka_artefact,'o','Color', [0.5 0 0.5])
+            end
             % --- store evoked spike ISI ---
-             if length(spkt_trn)>1
-                 evoked_spike_ISIs = diff(spkt_trn);
-             end
-        
-             hold off
-            
+            if length(spkt_trn)>1
+                evoked_spike_ISIs = diff(spkt_trn); %#ok<NASGU>
+            end
+            hold off
+
             % === Bottom panel: IFF ===
             subplot(2,1,2);   % 2 rows, 1 column, 2nd subplot (bottom)
-            
             if length(spkt_trn) > 1
                 plot(spkt_filtered(2:end), evoked_IFF_vector, 'o-');
                 hold on
-                if ~isempty(idxDrop)
+                if exist('idxDrop','var') && ~isempty(idxDrop)
                     xline(spkt_filtered(idxDrop+1),'r--'); % Beginning (inclusive) of spike exclusion
                 end
                 yline(preAve_Freq,'r--');
@@ -421,22 +332,25 @@ for iCell = Cells %Cells is our input argument, which is usually 1; However this
                 text(0.5,0.5,'Not enough spikes for calculating IFF','Units','normalized',...
                     'HorizontalAlignment','center');
             end
-        
-            %figure(2)
-            %hist(ISIs,50)
-            %disp(mean(ISIs))
-            %disp(std(ISIs))
-            
-             
-            if TF == 0 && TF2 == 0
+
+            if ~isempty(evoked_spike_timestamps) && ~isempty(spkt_trn)
                 Total_SpikeNo = length(spkt_trn);
                 Total_Time = t{sweep}(end) - (bsl_duration+0.01);
                 spkt_trn_lth = spkt_trn(end) - spkt_trn(1);
-                Ave_Freq = length(spkt_trn) ./ spkt_trn_lth;
-                CV = std(evoked_spike_ISIs) ./ mean(evoked_spike_ISIs);
-                Max_Freq = 1 / min(evoked_spike_ISIs);
+                if spkt_trn_lth>0
+                    Ave_Freq = length(spkt_trn) ./ spkt_trn_lth;
+                else
+                    Ave_Freq = 0;
+                end
+                if numel(spkt_trn)>1
+                    tmpISI = diff(spkt_trn);
+                    CV = std(tmpISI) ./ mean(tmpISI);
+                    Max_Freq = 1 / min(tmpISI);
+                else
+                    CV = NaN;
+                    Max_Freq = 0;
+                end
                 Latency = evoked_spike_timestamps(1) - (bsl_duration+0.01);
-                
             else
                 Total_SpikeNo = 0;
                 Total_Time = t{sweep}(end) - (bsl_duration+0.01);
@@ -446,55 +360,51 @@ for iCell = Cells %Cells is our input argument, which is usually 1; However this
                 Max_Freq = 0;
                 Latency = NaN;
             end
-        
+
             % Subtracting evoked spikes by preAve_Freq*spkt_trn_lth
             bsl_spike_in_spkt_trn  = round(preAve_Freq*spkt_trn_lth);
             bsl_subtracted_SpikeNo = Total_SpikeNo - bsl_spike_in_spkt_trn;
-                
             if bsl_subtracted_SpikeNo < 0
                 bsl_subtracted_SpikeNo = 0;
             end
-        
-        
+
             % Subtracted spike section
             row = row + 1;
-            spikeanalysis(row, 1)  = iterTag;                  
-            spikeanalysis(row, 2)  = stimulation_intensity;    
-            spikeanalysis(row, 3)  = sweep;                    
-            spikeanalysis(row, 4)  = bsl_subtracted_SpikeNo;   
-            spikeanalysis(row, 5)  = Total_SpikeNo;            
-            spikeanalysis(row, 6)  = preAve_Freq;              
-            spikeanalysis(row, 7)  = spkt_trn_lth;             
-            spikeanalysis(row, 8)  = bsl_spike_in_spkt_trn;    
-        
+            spikeanalysis(row, 1)  = iterTag;                  % relative iteration number among matches
+            spikeanalysis(row, 2)  = stimulation_intensity;    % uA
+            spikeanalysis(row, 3)  = sweep;                    % sweep index
+            spikeanalysis(row, 4)  = bsl_subtracted_SpikeNo;   % baseline-subtracted spikes in train
+            spikeanalysis(row, 5)  = Total_SpikeNo;            % raw spikes in train
+            spikeanalysis(row, 6)  = preAve_Freq;              % baseline avg freq (Hz)
+            spikeanalysis(row, 7)  = spkt_trn_lth;             % train length (s)
+            spikeanalysis(row, 8)  = bsl_spike_in_spkt_trn;    % expected baseline spikes in train
+
             % Post-stimulus spike section
-            spikeanalysis(row, 9)  = sweep;                    
-            spikeanalysis(row,10)  = Total_SpikeNo;            
-            spikeanalysis(row,11)  = Total_Time;               
-            spikeanalysis(row,12)  = spkt_trn_lth;             
-            spikeanalysis(row,13)  = Ave_Freq;                 
-            spikeanalysis(row,14)  = Max_Freq;                 
-            spikeanalysis(row,15)  = CV;                       
-            spikeanalysis(row,16)  = Latency;                  
-            
+            spikeanalysis(row, 9)  = sweep;                    % (duplicate of col 3)
+            spikeanalysis(row,10)  = Total_SpikeNo;            % total spikes
+            spikeanalysis(row,11)  = Total_Time;               % analyzed duration (s)
+            spikeanalysis(row,12)  = spkt_trn_lth;             % train length (s)
+            spikeanalysis(row,13)  = Ave_Freq;                 % avg frequency (Hz)
+            spikeanalysis(row,14)  = Max_Freq;                 % max frequency (Hz)
+            spikeanalysis(row,15)  = CV;                       % coefficient of variation of ISIs
+            spikeanalysis(row,16)  = Latency;                  % latency (s)
+
             % Pre-stimuli spike section
-            spikeanalysis(row,17)  = preTotal_SpikeNo;        
-            spikeanalysis(row,18)  = prespk_trn_lth;           
-            spikeanalysis(row,19)  = preAve_Freq;              
-               
-            
+            if exist('preTotal_SpikeNo','var') && exist('prespk_trn_lth','var') && exist('preAve_Freq','var')
+                spikeanalysis(row,17)  = preTotal_SpikeNo;        
+                spikeanalysis(row,18)  = prespk_trn_lth;           
+                spikeanalysis(row,19)  = preAve_Freq;              
+            else
+                spikeanalysis(row,17:19) = [0 0 0];
+            end
+
             disp("press any key to continue")
-            
+
             % === SAVE FIGURE / SUBPLOTS ===
             drawnow;  % make sure graphics are up-to-date
-            
-            %fnameBase = sprintf('Cell%02d_Iter%02d_Sweep%02d_%g_uA', iCell, iterTag, sweep, stimulation_intensity);
-            fnameBase = sprintf('WRKOSN %02d_Sweep%02d_%g_uA', protIdxList(protIdx), sweep, stimulation_intensity);
-
-            % (A) Save the whole figure (PNG + optional FIG)
+            fnameBase = sprintf('WRKOSN %02d_Sweep%02d_%g_uA', iterTag, sweep, stimulation_intensity);
             pngPath = fullfile(outDir, [fnameBase '.png']);
             exportgraphics(fig, pngPath, 'Resolution', 300);
-            % savefig(fig, fullfile(outDir, [fnameBase '.fig']));   % optional: reopenable in MATLAB
             pause;
             close(fig);
         end % sweep
@@ -502,4 +412,6 @@ for iCell = Cells %Cells is our input argument, which is usually 1; However this
 end % cell
 
 % Group by iteration (col 1), then sort by stimulation intensity (col 2)
-spikeanalysis = sortrows(spikeanalysis, [1 2]);
+if ~isempty(spikeanalysis)
+    spikeanalysis = sortrows(spikeanalysis, [1 2]);
+end
