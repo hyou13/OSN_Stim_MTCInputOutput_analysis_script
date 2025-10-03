@@ -1,2 +1,10 @@
 .DS_Store
 *.asv
+CHANGES_for_script.rtf
+LinearRegression_slope_plots/
+Output_240424to0525/
+old_files/
+spikeanalysis/
+spiketrn_IFF_figs/
+summaryTbl/
+~$*.docx
